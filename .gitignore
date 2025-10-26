@@ -140,6 +140,7 @@ celerybeat.pid
 .venv
 env/
 venv/
+pyvenv/
 ENV/
 env.bak/
 venv.bak/
@@ -212,3 +213,7 @@ data/
 models/
 logs/
 .env
+mlruns/
+mlflow-env/
+.DS_Store
+processed_data.zip
