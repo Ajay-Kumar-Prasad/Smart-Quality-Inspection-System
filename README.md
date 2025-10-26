@@ -70,7 +70,7 @@ smart-quality-inspection-system/
 │       └── schema.sql
 │
 ├── dashboard/
-│   ├── streamlit_app.py     # or React frontend
+│   ├── app.py     # or React frontend
 │
 ├── deployment/
 │   ├── Dockerfile
@@ -165,14 +165,6 @@ smart-quality-inspection-system/
 | 5 | FastAPI inference service + Docker deployment |
 | 6 | Dashboard, monitoring, and model retraining setup |
 
----
-
-## 🧠 Resume Value
-
-- Combines **Computer Vision + MLOps** for a full lifecycle project  
-- Demonstrates **data pipeline, training, deployment, monitoring**  
-- Shows ability to build **production-grade AI systems** end-to-end  
-- Perfect for interviews with AI/ML or Computer Vision engineering teams  
 
 ---
 
