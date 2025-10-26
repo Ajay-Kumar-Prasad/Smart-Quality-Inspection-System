@@ -1,0 +1,12 @@
+torch
+torchvision
+ultralytics
+opencv-python
+fastapi
+uvicorn
+streamlit
+mlflow
+boto3
+docker
+psycopg2
+albumentations
