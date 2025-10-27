@@ -108,6 +108,10 @@ smart-quality-inspection-system/
 - Clean data (lighting correction, denoise, etc.)  
 - Store raw & processed images in AWS S3  
 - Version datasets using MLflow
+---
+![alt text](assets/image.png)
+
+---
 
 ### 2. Model Development (Weeks 3–4)
 - Train YOLOv8 for defect detection  
