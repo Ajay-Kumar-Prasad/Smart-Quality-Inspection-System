@@ -1,0 +1,14 @@
+artifact_uri: /Users/ajayyy/Desktop/Deep_Learning/Smart-Quality-Inspection-System/runs/mlflow/162470455450907832/1a1585e0974145d1ac6c95600d46fd44/artifacts
+end_time: 1761599440940
+entry_point_name: ''
+experiment_id: '162470455450907832'
+lifecycle_stage: active
+run_id: 1a1585e0974145d1ac6c95600d46fd44
+run_name: mvtec_train
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1761595533811
+status: 3
+tags: []
+user_id: ajayyy
