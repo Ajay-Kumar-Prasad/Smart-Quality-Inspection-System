@@ -104,46 +104,56 @@ def process_kolektor(root_dir, output_dir, aug):
     for p in [output_img_train, output_img_val, output_lbl_train, output_lbl_val]:
         p.mkdir(parents=True, exist_ok=True)
 
-    # Expected folder structure: KolektorSDD2/train / test / masks
+    # Process TRAIN data
     train_dir = root_dir / "train"
+    for img_path in train_dir.glob("*.png"):
+        # Skip GT masks
+        if img_path.name.endswith("_GT.png"):
+            continue
+
+        image = cv2.imread(str(img_path))
+        if image is None:
+            print(f"[WARN] Skipping unreadable image: {img_path}")
+            continue
+
+        image = aug(image=image)['image']
+        out_img = output_img_train / img_path.name
+        cv2.imwrite(str(out_img), image)
+
+        mask_path = train_dir / (img_path.stem + "_GT.png")
+        label_path = output_lbl_train / (img_path.stem + ".txt")
+
+        if mask_path.exists():
+            bboxes = mask_to_bboxes(mask_path)
+            save_yolo_label(label_path, bboxes, *(image.shape[1::-1]))
+        else:
+            label_path.write_text("")
+
+    # Process TEST data
     test_dir = root_dir / "test"
-    mask_dir = root_dir / "masks"  # assuming masks are stored here
-
-    # Process training data
-    for img in train_dir.iterdir():
-        image = cv2.imread(str(img))
-        if image is None:
+    for img_path in test_dir.glob("*.png"):
+        if img_path.name.endswith("_GT.png"):
             continue
+
+        image = cv2.imread(str(img_path))
+        if image is None:
+            print(f"[WARN] Skipping unreadable image: {img_path}")
+            continue
+
         image = aug(image=image)['image']
-        out_img = output_img_train / img.name
+        out_img = output_img_val / img_path.name
         cv2.imwrite(str(out_img), image)
 
-        mask_path = mask_dir / img.name
+        mask_path = test_dir / (img_path.stem + "_GT.png")
+        label_path = output_lbl_val / (img_path.stem + ".txt")
+
         if mask_path.exists():
             bboxes = mask_to_bboxes(mask_path)
-            save_yolo_label(output_lbl_train / img.name.replace('.png', '.txt'),
-                            bboxes, *(image.shape[1::-1]))
+            save_yolo_label(label_path, bboxes, *(image.shape[1::-1]))
         else:
-            (output_lbl_train / img.name.replace('.png', '.txt')).write_text("")
+            label_path.write_text("")
 
-    # Process test data
-    for img in test_dir.iterdir():
-        image = cv2.imread(str(img))
-        if image is None:
-            continue
-        image = aug(image=image)['image']
-        out_img = output_img_val / img.name
-        cv2.imwrite(str(out_img), image)
-
-        mask_path = mask_dir / img.name
-        if mask_path.exists():
-            bboxes = mask_to_bboxes(mask_path)
-            save_yolo_label(output_lbl_val / img.name.replace('.png', '.txt'),
-                            bboxes, *(image.shape[1::-1]))
-        else:
-            (output_lbl_val / img.name.replace('.png', '.txt')).write_text("")
-
-    print("[INFO] KolektorSDD2 processed and converted to YOLO format.")
+    print("[INFO] KolektorSDD dataset processed successfully with separate train/test folders.")
 
 # ----------------------------- MAIN ----------------------------------
 
@@ -162,7 +172,7 @@ if __name__ == "__main__":
         }
     }
 
-    process_mvtec(datasets["mvtec"]["root"], datasets["mvtec"]["out"], aug)
+    # process_mvtec(datasets["mvtec"]["root"], datasets["mvtec"]["out"], aug)
     process_kolektor(datasets["kolektor"]["root"], datasets["kolektor"]["out"], aug)
 
     print("\n All datasets processed successfully! YOLO-ready data is in 'data/processed/'")
