@@ -1,12 +1,16 @@
 # src/data_preprocessing.py
 from pathlib import Path
 import cv2
-import os
-from albumentations import Compose, RandomBrightnessContrast, HorizontalFlip, VerticalFlip, RandomRotate90, Blur, Resize
+import numpy as np
+from albumentations import (
+    Compose, RandomBrightnessContrast, HorizontalFlip, VerticalFlip,
+    RandomRotate90, Blur, Resize
+)
 
 # ----------------------------- AUGMENTATION ----------------------------------
 
 def build_augmentations():
+    """Define augmentation pipeline for both image and mask."""
     return Compose([
         Resize(640, 640),
         HorizontalFlip(p=0.5),
@@ -14,21 +18,26 @@ def build_augmentations():
         RandomRotate90(p=0.3),
         RandomBrightnessContrast(p=0.2),
         Blur(blur_limit=3, p=0.1)
-    ])
+    ], additional_targets={'mask': 'mask'})
 
 # ----------------------------- UTILS -----------------------------------------
 
-def mask_to_bboxes(mask_path):
-    mask = cv2.imread(str(mask_path), 0)
-    if mask is None:
+def mask_to_bboxes(mask):
+    """Convert binary mask → YOLO bounding boxes."""
+    if mask is None or np.count_nonzero(mask) == 0:
         return []
     contours, _ = cv2.findContours((mask > 127).astype('uint8'),
                                    cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    boxes = [cv2.boundingRect(cnt) for cnt in contours]
+    boxes = []
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w > 2 and h > 2:
+            boxes.append((x, y, w, h))
     return boxes
 
 
 def save_yolo_label(txt_path, bboxes, img_w, img_h, class_id=0):
+    """Save list of bounding boxes in YOLO format."""
     with open(str(txt_path), "w") as f:
         for x, y, w, h in bboxes:
             x_c = (x + w / 2) / img_w
@@ -37,9 +46,18 @@ def save_yolo_label(txt_path, bboxes, img_w, img_h, class_id=0):
             h_n = h / img_h
             f.write(f"{class_id} {x_c:.6f} {y_c:.6f} {w_n:.6f} {h_n:.6f}\n")
 
+
+def sanity_check(output_dir):
+    """Check if images and labels count match."""
+    for split in ['train', 'val']:
+        img_count = len(list((output_dir / f"images/{split}").glob("*.png")))
+        lbl_count = len(list((output_dir / f"labels/{split}").glob("*.txt")))
+        print(f"[CHECK] {split.upper()}: {img_count} images, {lbl_count} labels")
+
 # ----------------------------- MVTec PROCESSING ----------------------------------
 
-def process_mvtec(root_dir, output_dir, aug):
+def process_mvtec(root_dir, output_dir, aug, class_map=None):
+    """Process MVTec AD dataset into YOLO format."""
     root_dir = Path(root_dir)
     output_img_train = output_dir / "images/train"
     output_img_val = output_dir / "images/val"
@@ -53,48 +71,59 @@ def process_mvtec(root_dir, output_dir, aug):
         if not category.is_dir():
             continue
 
-        # Train - good images (no defects)
+        # Train - good (normal)
         train_good = category / "train" / "good"
         if train_good.exists():
-            for img in train_good.iterdir():
-                image = cv2.imread(str(img))
+            for img_path in train_good.iterdir():
+                image = cv2.imread(str(img_path))
                 if image is None:
                     continue
-                image = aug(image=image)['image']
-                out_img = output_img_train / f"{category.name}_{img.name}"
+                augmented = aug(image=image, mask=image)
+                image = augmented['image']
+                out_img = output_img_train / f"{category.name}_{img_path.name}"
                 cv2.imwrite(str(out_img), image)
-                (output_lbl_train / out_img.name.replace('.png', '.txt')).write_text("")  # no defect
+                (output_lbl_train / out_img.name.replace('.png', '.txt')).write_text("")
 
-        # Validation - defects + good
+        # Validation (defects + good)
         test_dir = category / "test"
         gt_dir = category / "ground_truth"
+        if not test_dir.exists():
+            continue
 
-        if test_dir.exists():
-            for defect_type in test_dir.iterdir():
-                if not defect_type.is_dir():
+        for defect_type in test_dir.iterdir():
+            if not defect_type.is_dir():
+                continue
+
+            class_id = class_map.get(defect_type.name, 0) if class_map else 0
+
+            for img_path in defect_type.iterdir():
+                image = cv2.imread(str(img_path))
+                if image is None:
                     continue
-                for img in defect_type.iterdir():
-                    image = cv2.imread(str(img))
-                    if image is None:
-                        continue
-                    image = aug(image=image)['image']
-                    dst_img = output_img_val / f"{category.name}_{defect_type.name}_{img.name}"
-                    cv2.imwrite(str(dst_img), image)
 
-                    # Find mask
-                    mask_candidate = gt_dir / defect_type.name / img.name.replace('.png', '_mask.png')
-                    if mask_candidate.exists():
-                        bboxes = mask_to_bboxes(mask_candidate)
-                        save_yolo_label(output_lbl_val / dst_img.name.replace('.png', '.txt'),
-                                        bboxes, *(image.shape[1::-1]))
-                    else:
-                        (output_lbl_val / dst_img.name.replace('.png', '.txt')).write_text("")
+                mask_path = gt_dir / defect_type.name / img_path.name.replace('.png', '_mask.png')
+                mask = cv2.imread(str(mask_path), 0) if mask_path.exists() else np.zeros(image.shape[:2], dtype=np.uint8)
+
+                augmented = aug(image=image, mask=mask)
+                image, mask = augmented['image'], augmented['mask']
+
+                dst_img = output_img_val / f"{category.name}_{defect_type.name}_{img_path.name}"
+                cv2.imwrite(str(dst_img), image)
+
+                bboxes = mask_to_bboxes(mask)
+                label_path = output_lbl_val / dst_img.name.replace('.png', '.txt')
+                if bboxes:
+                    save_yolo_label(label_path, bboxes, *(image.shape[1::-1]), class_id=class_id)
+                else:
+                    label_path.write_text("")
 
     print("[INFO] MVTec AD processed and converted to YOLO format.")
+    sanity_check(output_dir)
 
 # ----------------------------- KolektorSDD PROCESSING ----------------------------------
 
 def process_kolektor(root_dir, output_dir, aug):
+    """Process KolektorSDD (binary defect dataset) into YOLO format."""
     root_dir = Path(root_dir)
     output_img_train = output_dir / "images/train"
     output_img_val = output_dir / "images/val"
@@ -104,56 +133,38 @@ def process_kolektor(root_dir, output_dir, aug):
     for p in [output_img_train, output_img_val, output_lbl_train, output_lbl_val]:
         p.mkdir(parents=True, exist_ok=True)
 
-    # Process TRAIN data
-    train_dir = root_dir / "train"
-    for img_path in train_dir.glob("*.png"):
-        # Skip GT masks
-        if img_path.name.endswith("_GT.png"):
-            continue
+    for phase in ["train", "test"]:
+        img_out = output_img_train if phase == "train" else output_img_val
+        lbl_out = output_lbl_train if phase == "train" else output_lbl_val
 
-        image = cv2.imread(str(img_path))
-        if image is None:
-            print(f"[WARN] Skipping unreadable image: {img_path}")
-            continue
+        for img_path in (root_dir / phase).glob("*.png"):
+            if img_path.name.endswith("_GT.png"):
+                continue
 
-        image = aug(image=image)['image']
-        out_img = output_img_train / img_path.name
-        cv2.imwrite(str(out_img), image)
+            image = cv2.imread(str(img_path))
+            if image is None:
+                print(f"[WARN] Skipping unreadable image: {img_path}")
+                continue
 
-        mask_path = train_dir / (img_path.stem + "_GT.png")
-        label_path = output_lbl_train / (img_path.stem + ".txt")
+            mask_path = img_path.parent / (img_path.stem + "_GT.png")
+            mask = cv2.imread(str(mask_path), 0) if mask_path.exists() else np.zeros(image.shape[:2], dtype=np.uint8)
 
-        if mask_path.exists():
-            bboxes = mask_to_bboxes(mask_path)
-            save_yolo_label(label_path, bboxes, *(image.shape[1::-1]))
-        else:
-            label_path.write_text("")
+            augmented = aug(image=image, mask=mask)
+            image, mask = augmented['image'], augmented['mask']
 
-    # Process TEST data
-    test_dir = root_dir / "test"
-    for img_path in test_dir.glob("*.png"):
-        if img_path.name.endswith("_GT.png"):
-            continue
+            out_img = img_out / img_path.name
+            cv2.imwrite(str(out_img), image)
 
-        image = cv2.imread(str(img_path))
-        if image is None:
-            print(f"[WARN] Skipping unreadable image: {img_path}")
-            continue
+            bboxes = mask_to_bboxes(mask)
+            label_path = lbl_out / (img_path.stem + ".txt")
 
-        image = aug(image=image)['image']
-        out_img = output_img_val / img_path.name
-        cv2.imwrite(str(out_img), image)
+            if bboxes:
+                save_yolo_label(label_path, bboxes, *(image.shape[1::-1]), class_id=0)
+            else:
+                label_path.write_text("")
 
-        mask_path = test_dir / (img_path.stem + "_GT.png")
-        label_path = output_lbl_val / (img_path.stem + ".txt")
-
-        if mask_path.exists():
-            bboxes = mask_to_bboxes(mask_path)
-            save_yolo_label(label_path, bboxes, *(image.shape[1::-1]))
-        else:
-            label_path.write_text("")
-
-    print("[INFO] KolektorSDD dataset processed successfully with separate train/test folders.")
+    print("[INFO] KolektorSDD processed successfully.")
+    sanity_check(output_dir)
 
 # ----------------------------- MAIN ----------------------------------
 
@@ -172,7 +183,60 @@ if __name__ == "__main__":
         }
     }
 
-    # process_mvtec(datasets["mvtec"]["root"], datasets["mvtec"]["out"], aug)
+    # Define class mapping for known MVTec defect types
+    CLASS_MAP = {
+    'bent': 0,
+    'bent_lead': 1,
+    'bent_wire': 2,
+    'broken': 3,
+    'broken_large': 4,
+    'broken_small': 5,
+    'broken_teeth': 6,
+    'cable_swap': 7,
+    'color': 8,
+    'combined': 9,
+    'contamination': 10,
+    'crack': 11,
+    'cut': 12,
+    'cut_inner_insulation': 13,
+    'cut_lead': 14,
+    'cut_outer_insulation': 15,
+    'damaged_case': 16,
+    'defective': 17,
+    'fabric_border': 18,
+    'fabric_interior': 19,
+    'faulty_imprint': 20,
+    'flip': 21,
+    'fold': 22,
+    'glue': 23,
+    'glue_strip': 24,
+    'gray_stroke': 25,
+    'hole': 26,
+    'liquid': 27,
+    'manipulated_front': 28,
+    'metal_contamination': 29,
+    'misplaced': 30,
+    'missing_cable': 31,
+    'missing_wire': 32,
+    'oil': 33,
+    'pill_type': 34,
+    'poke': 35,
+    'poke_insulation': 36,
+    'print': 37,
+    'rough': 38,
+    'scratch': 39,
+    'scratch_head': 40,
+    'scratch_neck': 41,
+    'split_teeth': 42,
+    'squeeze': 43,
+    'squeezed_teeth': 44,
+    'thread': 45,
+    'thread_side': 46,
+    'thread_top': 47
+}
+
+
+    process_mvtec(datasets["mvtec"]["root"], datasets["mvtec"]["out"], aug, class_map=CLASS_MAP)
     process_kolektor(datasets["kolektor"]["root"], datasets["kolektor"]["out"], aug)
 
-    print("\n All datasets processed successfully! YOLO-ready data is in 'data/processed/'")
+    print("\nAll datasets processed successfully! YOLO-ready data in 'data/processed/'")
