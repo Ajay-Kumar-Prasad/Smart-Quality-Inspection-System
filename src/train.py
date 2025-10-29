@@ -4,7 +4,7 @@ import random
 import numpy as np
 import torch
 import mlflow
-from datetime import datatime
+from datetime import datetime
 from ultralytics import YOLO
 
 def  set_seed(seed=42):
@@ -18,6 +18,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--data", required=True, help="Path to YOLO data.yaml")
     p.add_argument("--model", type=str, default="yolov8n.pt", help="Base pretrained model (yolov8n.pt/yolov8s.pt/...)")
+    p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--batch", type=int, default=16)
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--device", type=str, default="0", help="'0' or 'cpu'")
@@ -40,7 +41,7 @@ def main():
     mlflow.set_tracking_uri(f"file://{mlflow_dir.resolve()}")
     mlflow.set_experiment("YOLOv8_Defect_Detection")
 
-    run_name =f"{args.name}_{datatime.now().strftime("%Y%m%d_%H%M%S")}"
+    run_name =f"{args.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     with mlflow.start_run(run_name=run_name) as run:
         #Log hyperparams
         mlflow.log_param("data_yaml",str(data_yaml))
@@ -48,7 +49,7 @@ def main():
         mlflow.log_param("epochs",args.epochs)
         mlflow.log_param("batch", args.batch)
         mlflow.log_param("imgsz", args.imgsz)
-        mlflow.log_param("device",args.device)
+        mlflow.log_param("device", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")
         mlflow.log_param("seed",args.seed)
 
         # Load Model

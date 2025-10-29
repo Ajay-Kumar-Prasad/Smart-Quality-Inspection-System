@@ -106,7 +106,7 @@ smart-quality-inspection-system/
 ### 1. Data Pipeline (Weeks 1–2)
 - Collect + augment datasets using Albumentations  
 - Clean data (lighting correction, denoise, etc.)  
-- Store raw & processed images in AWS S3  
+- Store raw & processed images in AWS S3  (optional)
 - Version datasets using MLflow
 ---
 ![alt text](assets/image.png)
@@ -114,7 +114,7 @@ smart-quality-inspection-system/
 ---
 
 ### 2. Model Development (Weeks 3–4)
-- Train YOLOv8 for defect detection  
+- Train YOLOv8 for defect detection  (Train on Kolektor & fine-tune on MVTEC_AD)
 - Refine segmentation using SAM  
 - Log experiments and metrics in MLflow  
 - Export final model to ONNX/TorchScript
