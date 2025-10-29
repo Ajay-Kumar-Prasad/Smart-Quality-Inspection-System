@@ -218,3 +218,5 @@ mlflow-env/
 .DS_Store
 processed_data.zip
 runs/
+src/yolo_config/best.pt
+deployment/mlflow_tracking/mlruns/
