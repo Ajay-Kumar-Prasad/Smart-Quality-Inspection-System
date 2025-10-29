@@ -7,56 +7,71 @@ import mlflow
 from datetime import datetime
 from ultralytics import YOLO
 
-def  set_seed(seed=42):
+
+def set_seed(seed=42):
+    """Set global random seeds for reproducibility."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
+
 def parse_args():
-    p = argparse.ArgumentParser()
+    """Parse command-line arguments."""
+    p = argparse.ArgumentParser(description="Train YOLOv8 for defect detection with MLflow tracking")
     p.add_argument("--data", required=True, help="Path to YOLO data.yaml")
-    p.add_argument("--model", type=str, default="yolov8n.pt", help="Base pretrained model (yolov8n.pt/yolov8s.pt/...)")
+    p.add_argument("--model", type=str, default="yolov8n.pt", help="Pretrained YOLOv8 model (e.g. yolov8n.pt, yolov8s.pt)")
     p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--batch", type=int, default=16)
     p.add_argument("--imgsz", type=int, default=640)
-    p.add_argument("--device", type=str, default="0", help="'0' or 'cpu'")
-    p.add_argument("--project", type=str, default="runs/yolov8", help="Ultralytics project output")
-    p.add_argument("--name", type=str, default="defect_detector", help="run name")
-    p.add_argument("--mlflow_dir", type=str, default="deployment/mlflow_tracking", help="MLflow tracking dir")
+    p.add_argument("--device", type=str, default="auto", help="'0' for GPU, 'cpu' for CPU, or 'auto'")
+    p.add_argument("--project", type=str, default="runs/yolov8", help="Ultralytics project output folder")
+    p.add_argument("--name", type=str, default="defect_detector", help="Name for this training run")
+    p.add_argument("--mlflow_dir", type=str, default="deployment/mlflow_tracking", help="MLflow tracking directory")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
+
 
 def main():
     args = parse_args()
     set_seed(args.seed)
 
-    data_yaml = Path(args.data)
+    data_yaml = Path(args.data).resolve()
     assert data_yaml.exists(), f"data.yaml not found: {data_yaml}"
 
-    #Setup MLflow
-    mlflow_dir = Path(args.mlflow_dir)
+    mlflow_dir = Path(args.mlflow_dir).resolve()
     mlflow_dir.mkdir(parents=True, exist_ok=True)
-    mlflow.set_tracking_uri(f"file://{mlflow_dir.resolve()}")
+
+    # Auto-select device
+    if args.device == "auto":
+        args.device = "0" if torch.cuda.is_available() else "cpu"
+
+    print(f"Using device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
+
+    # Setup MLflow
+    mlflow.set_tracking_uri(f"file://{mlflow_dir}")
     mlflow.set_experiment("YOLOv8_Defect_Detection")
 
-    run_name =f"{args.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_name = f"{args.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
     with mlflow.start_run(run_name=run_name) as run:
-        #Log hyperparams
-        mlflow.log_param("data_yaml",str(data_yaml))
-        mlflow.log_param("base_model",args.model)
-        mlflow.log_param("epochs",args.epochs)
-        mlflow.log_param("batch", args.batch)
-        mlflow.log_param("imgsz", args.imgsz)
-        mlflow.log_param("device", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")
-        mlflow.log_param("seed",args.seed)
+        # Log hyperparameters
+        mlflow.log_params({
+            "data_yaml": str(data_yaml),
+            "base_model": args.model,
+            "epochs": args.epochs,
+            "batch": args.batch,
+            "imgsz": args.imgsz,
+            "device": args.device,
+            "seed": args.seed
+        })
 
-        # Load Model
-        model = YOLO(args.model) 
+        # Load YOLO model
+        model = YOLO(args.model)
 
-        # Train Model
-        print(f"Starting training : model={args.model} data={data_yaml} epochs={args.epochs}")
+        # Train model
+        print(f"Starting training: model={args.model}, data={data_yaml}, epochs={args.epochs}")
         results = model.train(
             data=str(data_yaml),
             epochs=args.epochs,
@@ -68,48 +83,40 @@ def main():
             exist_ok=True
         )
 
+        # Log metrics
         try:
-            # Newer Ultralytics returns a Results object with metrics attr
-            metrics = results.metrics
-            if hasattr(metrics, 'mAP50'):
-                mlflow.log_metric("mAP50", float(metrics.mAP50))
-            # sometimes metrics fields are accessible under dict
+            if hasattr(results, "metrics"):
+                metrics = results.metrics
+                for k, v in metrics.items():
+                    try:
+                        mlflow.log_metric(k, float(v))
+                    except Exception:
+                        pass
         except Exception:
-            pass
+            print("Could not extract YOLO metrics safely.")
 
-        # Try alternate access
-        try:
-            rd = getattr(results, "results_dict", None)
-            if rd:
-                for k, v in rd.items():
-                    # Log important metrics if present
-                    if "mAP50" in k or "mAP" in k:
-                        try:
-                            mlflow.log_metric(k, float(v))
-                        except Exception:
-                            pass
-        except Exception:
-            pass
+        # Log model artifacts
+        weights_dir = Path(args.project) / args.name / "weights"
+        best_path = weights_dir / "best.pt"
+        last_path = weights_dir / "last.pt"
 
-        # Log model artifacts: best weights and results folder
-        weights_path = Path(args.project) / args.name /"weights" / "best.pt"
-        last_path = Path(args.project) / args.name / "weights" / "last.pt"
-        run_folder = Path(args.project) / args.name
-
-        if weights_path.exists():
-            mlflow.log_artifact(str(weights_path), artifact_path="yolo_weights")
+        if best_path.exists():
+            mlflow.log_artifact(str(best_path), artifact_path="yolo_weights")
         elif last_path.exists():
             mlflow.log_artifact(str(last_path), artifact_path="yolo_weights")
 
-        # Log the whole run folder as artifact
+        # Log run directory
+        run_folder = Path(args.project) / args.name
         if run_folder.exists():
             mlflow.log_artifact(str(run_folder), artifact_path="yolo_run_artifacts")
 
-        print(f"Training finished. Run ID: {run.info.run_id}")
-        print("Best weights saved to:", weights_path if weights_path.exists() else last_path)
+        print(f"\nTraining completed. MLflow Run ID: {run.info.run_id}")
+        print("Best weights saved to:", best_path if best_path.exists() else last_path)
+
 
 if __name__ == "__main__":
     main()
+
 
 
 '''

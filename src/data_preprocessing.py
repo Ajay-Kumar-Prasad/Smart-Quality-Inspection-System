@@ -54,7 +54,7 @@ def sanity_check(output_dir):
         lbl_count = len(list((output_dir / f"labels/{split}").glob("*.txt")))
         print(f"[CHECK] {split.upper()}: {img_count} images, {lbl_count} labels")
 
-# ----------------------------- MVTec PROCESSING ----------------------------------
+# ----------------------------- MVTEC_AD PROCESSING ----------------------------------
 
 def process_mvtec(root_dir, output_dir, aug, class_map=None):
     """Process MVTec AD dataset into YOLO format."""
@@ -183,7 +183,7 @@ if __name__ == "__main__":
         }
     }
 
-    # Define class mapping for known MVTec defect types
+    # Define class mapping for known MVTEC_AD defect types
     CLASS_MAP = {
     'bent': 0,
     'bent_lead': 1,
