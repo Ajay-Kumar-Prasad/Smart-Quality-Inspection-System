@@ -108,34 +108,12 @@ smart-quality-inspection-system/
 - Clean data (lighting correction, denoise, etc.)  
 - Store raw & processed images in AWS S3  (optional)
 - Version datasets using MLflow
----
-![alt text](assets/image_data.png)
-
----
 
 ### 2. Model Development (Weeks 3–4)
 - Train YOLOv8 for defect detection  (Train on Kolektor & fine-tune on MVTEC_AD)
 - Refine segmentation using SAM  
 - Log experiments and metrics in MLflow  
 - Export final model to ONNX/TorchScript
-
-(Need Improvements)
----
-![alt text](assets/image.png)
-
----
-![alt text](assets/image-1.png)
-
----
-![alt text](assets/image-2.png)
-
----
-![alt text](assets/image-3.png)
-
----
-![alt text](assets/image-4.png)
-
----
 
 ### 3. Serving & Deployment (Week 5)
 - Build inference API with FastAPI  
