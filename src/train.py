@@ -22,7 +22,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Train YOLOv8 for defect detection with MLflow tracking")
     p.add_argument("--data", required=True, help="Path to YOLO data.yaml")
     p.add_argument("--model", type=str, default="yolov8n.pt", help="Pretrained YOLOv8 model (e.g. yolov8n.pt, yolov8s.pt)")
-    p.add_argument("--epochs", type=int, default=50)
+    p.add_argument("--epochs", type=int, default=100)
     p.add_argument("--batch", type=int, default=16)
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--device", type=str, default="auto", help="'0' for GPU, 'cpu' for CPU, or 'auto'")

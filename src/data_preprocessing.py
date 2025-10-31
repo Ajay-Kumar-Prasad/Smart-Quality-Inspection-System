@@ -2,22 +2,32 @@
 from pathlib import Path
 import cv2
 import numpy as np
+import random
+from tqdm import tqdm
 from albumentations import (
-    Compose, RandomBrightnessContrast, HorizontalFlip, VerticalFlip,
-    RandomRotate90, Blur, Resize
+    Compose, HorizontalFlip, VerticalFlip, RandomRotate90,
+    ShiftScaleRotate, RandomBrightnessContrast, HueSaturationValue,
+    GaussianBlur, MotionBlur, GaussNoise, CLAHE, RandomGamma,
+    Resize
 )
 
 # ----------------------------- AUGMENTATION ----------------------------------
 
 def build_augmentations():
-    """Define augmentation pipeline for both image and mask."""
+    """Define a stronger augmentation pipeline."""
     return Compose([
         Resize(640, 640),
-        HorizontalFlip(p=0.5),
-        VerticalFlip(p=0.2),
-        RandomRotate90(p=0.3),
-        RandomBrightnessContrast(p=0.2),
-        Blur(blur_limit=3, p=0.1)
+        HorizontalFlip(p=0.6),
+        VerticalFlip(p=0.3),
+        RandomRotate90(p=0.5),
+        ShiftScaleRotate(shift_limit=0.05, scale_limit=0.1, rotate_limit=30, p=0.5),
+        RandomBrightnessContrast(p=0.4),
+        HueSaturationValue(p=0.3),
+        GaussianBlur(blur_limit=3, p=0.2),
+        MotionBlur(blur_limit=3, p=0.2),
+        GaussNoise(var_limit=(10.0, 50.0), p=0.3),
+        CLAHE(p=0.3),
+        RandomGamma(p=0.3),
     ], additional_targets={'mask': 'mask'})
 
 # ----------------------------- UTILS -----------------------------------------
@@ -122,48 +132,99 @@ def process_mvtec(root_dir, output_dir, aug, class_map=None):
 
 # ----------------------------- KolektorSDD PROCESSING ----------------------------------
 
-def process_kolektor(root_dir, output_dir, aug):
-    """Process KolektorSDD (binary defect dataset) into YOLO format."""
+def process_kolektor(root_dir, output_dir, aug, target_samples=500, val_split=0.2):
+    """
+    Process KolektorSDD into YOLO format with 1:1 defect:non-defect ratio
+    using augmentations to reach ~1000 total images.
+    """
     root_dir = Path(root_dir)
-    output_img_train = output_dir / "images/train"
-    output_img_val = output_dir / "images/val"
-    output_lbl_train = output_dir / "labels/train"
-    output_lbl_val = output_dir / "labels/val"
+    output_dir = Path(output_dir)
 
-    for p in [output_img_train, output_img_val, output_lbl_train, output_lbl_val]:
-        p.mkdir(parents=True, exist_ok=True)
+    # Create dirs
+    for split in ["train", "val"]:
+        for sub in ["images", "labels"]:
+            (output_dir / sub / split).mkdir(parents=True, exist_ok=True)
 
+    print("[INFO] Scanning Kolektor dataset...")
+    clean_imgs, defect_imgs = [], []
+
+    # Identify defect vs clean
     for phase in ["train", "test"]:
-        img_out = output_img_train if phase == "train" else output_img_val
-        lbl_out = output_lbl_train if phase == "train" else output_lbl_val
-
         for img_path in (root_dir / phase).glob("*.png"):
             if img_path.name.endswith("_GT.png"):
                 continue
 
+            mask_path = img_path.parent / (img_path.stem + "_GT.png")
+            if mask_path.exists():
+                mask = cv2.imread(str(mask_path), 0)
+                if np.count_nonzero(mask) > 0:
+                    defect_imgs.append(img_path)
+                    continue
+            clean_imgs.append(img_path)
+
+    print(f"[INFO] Found {len(defect_imgs)} defect and {len(clean_imgs)} clean images.")
+
+    # Balance dataset 1:1 using augmentations if needed
+    n_def = len(defect_imgs)
+    n_clean = len(clean_imgs)
+
+    # If fewer defect images than target, augment to reach target
+    if n_def < target_samples:
+        aug_needed = target_samples - n_def
+        print(f"[AUG] Need {aug_needed} extra defect samples via augmentation.")
+        extra_defects = random.choices(defect_imgs, k=aug_needed)
+        for img_path in tqdm(extra_defects, desc="Augmenting defect images"):
+            image = cv2.imread(str(img_path))
+            mask_path = img_path.parent / (img_path.stem + "_GT.png")
+            mask = cv2.imread(str(mask_path), 0) if mask_path.exists() else np.zeros(image.shape[:2], dtype=np.uint8)
+            augmented = aug(image=image, mask=mask)
+            image_aug, mask_aug = augmented["image"], augmented["mask"]
+
+            aug_name = f"{img_path.stem}_aug{random.randint(0,9999)}.png"
+            aug_img_path = img_path.parent / aug_name
+            aug_mask_path = img_path.parent / (aug_name.replace(".png", "_GT.png"))
+            cv2.imwrite(str(aug_img_path), image_aug)
+            cv2.imwrite(str(aug_mask_path), mask_aug)
+            defect_imgs.append(aug_img_path)
+
+    # Sample balanced clean images
+    clean_imgs = random.sample(clean_imgs, min(len(clean_imgs), target_samples))
+    defect_imgs = random.sample(defect_imgs, min(len(defect_imgs), target_samples))
+
+    print(f"[INFO] Using {len(defect_imgs)} defect and {len(clean_imgs)} clean images for processing.")
+
+    # Combine and split
+    all_imgs = defect_imgs + clean_imgs
+    random.shuffle(all_imgs)
+    split_idx = int(len(all_imgs) * (1 - val_split))
+    train_imgs = all_imgs[:split_idx]
+    val_imgs = all_imgs[split_idx:]
+
+    # Process images
+    for split_name, split_imgs in zip(["train", "val"], [train_imgs, val_imgs]):
+        for img_path in tqdm(split_imgs, desc=f"Processing {split_name}"):
             image = cv2.imread(str(img_path))
             if image is None:
-                print(f"[WARN] Skipping unreadable image: {img_path}")
                 continue
 
             mask_path = img_path.parent / (img_path.stem + "_GT.png")
             mask = cv2.imread(str(mask_path), 0) if mask_path.exists() else np.zeros(image.shape[:2], dtype=np.uint8)
 
+            # Apply one more random augmentation pass
             augmented = aug(image=image, mask=mask)
-            image, mask = augmented['image'], augmented['mask']
+            image, mask = augmented["image"], augmented["mask"]
 
-            out_img = img_out / img_path.name
+            out_img = output_dir / f"images/{split_name}/{img_path.name}"
+            out_lbl = output_dir / f"labels/{split_name}/{img_path.stem}.txt"
             cv2.imwrite(str(out_img), image)
 
             bboxes = mask_to_bboxes(mask)
-            label_path = lbl_out / (img_path.stem + ".txt")
-
             if bboxes:
-                save_yolo_label(label_path, bboxes, *(image.shape[1::-1]), class_id=0)
+                save_yolo_label(out_lbl, bboxes, *(image.shape[1::-1]), class_id=0)
             else:
-                label_path.write_text("")
+                out_lbl.write_text("")
 
-    print("[INFO] KolektorSDD processed successfully.")
+    print(f"\n[INFO] KolektorSDD processed successfully (~{len(defect_imgs) + len(clean_imgs)} samples, 1:1 balanced).")
     sanity_check(output_dir)
 
 # ----------------------------- MAIN ----------------------------------
@@ -236,7 +297,14 @@ if __name__ == "__main__":
 }
 
 
-    process_mvtec(datasets["mvtec"]["root"], datasets["mvtec"]["out"], aug, class_map=CLASS_MAP)
-    process_kolektor(datasets["kolektor"]["root"], datasets["kolektor"]["out"], aug)
+    # process_mvtec(datasets["mvtec"]["root"], datasets["mvtec"]["out"], aug, class_map=CLASS_MAP)
+    process_kolektor(
+    datasets["kolektor"]["root"],
+    datasets["kolektor"]["out"],
+    aug,
+    target_samples=500,
+    val_split=0.2
+)
+
 
     print("\nAll datasets processed successfully! YOLO-ready data in 'data/processed/'")
