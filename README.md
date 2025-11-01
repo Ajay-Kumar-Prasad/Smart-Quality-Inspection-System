@@ -154,6 +154,64 @@ smart-quality-inspection-system/
 
 ---
 
+### 📋 Overview
+
+- Fine-tuned a YOLOv8 model for binary defect detection (defective, non_defective) using the MVTec AD dataset.
+- Training was performed on a Tesla T4 GPU for 100 epochs, achieving high recall and strong mAP performance.
+
+## ⚙️ Training Configuration
+
+| Parameter            | Value                            |
+| -------------------- | -------------------------------- |
+| **Model**            | YOLOv8m (Medium)                  |
+| **Framework**        | Ultralytics YOLOv8.2.90          |
+| **Dataset**          | MVTec AD                         |
+| **Classes**          | 2 — `non_defective`, `defective` |
+| **Epochs**           | 100                              |
+| **Batch Size**       | 16                               |
+| **Image Size**       | 640×640                          |
+| **Optimizer**        | AdamW                            |
+| **Learning Rate**    | 3e-5                             |
+| **Training Time**    | **4.152 hours**                  |
+| **Device**           | Tesla T4 (15GB VRAM)             |
+| **Total Parameters** | 25,857,478                       |
+| **GFLOPs**           | 79.069                           |
+
+### 📈 Validation Results
+
+---
+| Metric            | All Classes | non_defective | defective |
+| ----------------- | ----------- | ------------- | --------- |
+| **Precision (P)** | 0.556       | 0.738         | 0.374     |
+| **Recall (R)**    | 0.903       | 1.000         | 0.805     |
+| **mAP@0.5**       | 0.715       | 0.881         | 0.550     |
+| **mAP@0.5:0.95**  | 0.715       | 0.881         | 0.549     |
+---
+
+### Results
+
+- High recall (0.90) — model detects most true defects
+- Moderate precision (0.55) — some false positives present
+- Overall balanced accuracy ~73%
+
+## 🧩 Validation Metrics — YOLOv8 on MVTec AD
+
+***📊 Performance Metrics**
+
+---
+| Class             | Precision (P) | Recall (R) |  mAP@0.5  | mAP@0.5:0.95 |
+| :---------------- | :-----------: | :--------: | :-------: | :----------: |
+| **All Classes**   |   **0.554**   |  **0.910** | **0.715** |   **0.715**  |
+| **non_defective** |     0.738     |    1.000   |   0.881   |     0.881    |
+| **defective**     |     0.371     |    0.820   |   0.549   |     0.548    |
+---
+
+**Interpretation:**  
+- High recall: model catches most defects.  
+- Precision can improve with more balanced data.  
+- Overall mAP@0.5 = **0.715**, showing strong detection performance.
+
+---
 ## 🧭 Timeline
 
 | Week | Deliverables |
