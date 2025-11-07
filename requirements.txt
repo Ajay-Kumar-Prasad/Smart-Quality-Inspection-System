@@ -1,0 +1,16 @@
+torch
+torchvision
+ultralytics
+opencv-python
+segment-anything
+git+https://github.com/facebookresearch/segment-anything.git
+fastapi
+uvicorn
+streamlit
+mlflow
+boto3
+docker
+psycopg2
+albumentations
+matplotlib
+numpy
